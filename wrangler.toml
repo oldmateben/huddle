@@ -1,0 +1,35 @@
+name = "huddle"
+main = "worker/index.ts"
+compatibility_date = "2025-06-01"
+
+# The built React app. API and auth routes run the Worker first; everything else
+# is a static file, with unknown paths falling back to index.html.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/auth/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "huddle"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID" # from `wrangler d1 create huddle`
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "LIVE"
+class_name = "LiveSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LiveSession"]
+
+[vars]
+ADMIN_EMAIL = "ben.hafner@gmail.com"
+# Microsoft sign-in only trusts these tenants. Default is personal Microsoft accounts;
+# add your work tenant ID (comma-separated) if work colleagues sign in with Microsoft.
+MICROSOFT_ALLOWED_TENANTS = "9188040d-6c67-4c5b-b112-36a304b66dad"
+
+# Secrets (set with `wrangler secret put NAME`, never commit them):
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+#   MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET

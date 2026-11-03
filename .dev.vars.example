@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development (it's gitignored).
+# Lets you sign in at http://localhost:8787/signin without Google/Microsoft.
+DEV_LOGIN=true
+# Optional, to test real sign-in locally:
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
