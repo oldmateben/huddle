@@ -13,7 +13,7 @@ run_worker_first = ["/api/*", "/auth/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "huddle"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID" # from `wrangler d1 create huddle`
+database_id = "1766eeb7-7463-4bae-bec2-819cb57ddfa9"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
