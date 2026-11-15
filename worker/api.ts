@@ -1,6 +1,6 @@
 import type { Deck, Me, Member, Question, Role } from "../shared/types";
 import { FREE_DAILY_REQUESTS, TERMS_VERSION } from "../shared/types";
-import { cleanQuestion, cleanText, isCode, isEmail, isTheme, isUuid } from "../shared/validate";
+import { cleanQuestions, cleanText, isCode, isEmail, isTheme, isUuid } from "../shared/validate";
 import { currentUser, enabledProviders, User } from "./auth";
 import type { Env } from "./env";
 
@@ -226,9 +226,9 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
         if (isTheme(b.theme)) deck.theme = b.theme;
         if (typeof b.anonymous === "boolean") deck.anonymous = b.anonymous;
         if (Array.isArray(b.questions)) {
-          const qs = b.questions.slice(0, 50).map(cleanQuestion);
-          if (qs.some((q) => !q)) return fail(400, "One of the questions is invalid.");
-          deck.questions = qs as Question[];
+          const qs = cleanQuestions(b.questions.slice(0, 50));
+          if (typeof qs === "string") return fail(400, qs);
+          deck.questions = qs;
         }
         deck.updatedAt = now();
         await env.DB.prepare(`UPDATE decks SET title = ?, theme = ?, anonymous = ?, questions = ?, updated_at = ? WHERE id = ?`)

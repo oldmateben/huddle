@@ -28,6 +28,11 @@ export function aggregate(
   const votes = visible.filter((r) => r.kind === "v");
 
   switch (q.type) {
+    // step 2: aggregate votes and rankings using resolved options.
+    case "pick":
+      return { type: "pick", options: [], counts: {}, total: 0, leftOut: 0 };
+    case "rank":
+      return { type: "rank", options: [], scores: {}, firsts: {}, total: 0, leftOut: 0 };
     case "choice": {
       const counts: Record<string, number> = Object.fromEntries((q.options ?? []).map((o) => [o.id, 0]));
       for (const r of votes) if (val(r) in counts) counts[val(r)]++;

@@ -39,9 +39,49 @@ export function cleanQuestion(raw: any): Question | null {
       return q;
     case "words":
       return q;
+    case "pick":
+      if (!isId(raw.sourceId)) return null;
+      q.sourceId = raw.sourceId;
+      q.votesEach = raw.votesEach === 1 || raw.votesEach === 2 || raw.votesEach === 5 ? raw.votesEach : 3;
+      q.limit = cleanLimit(raw.limit, 20, 12);
+      q.allowOwn = raw.allowOwn !== false;
+      return q;
+    case "rank":
+      if (raw.sourceId !== undefined) {
+        if (!isId(raw.sourceId) || raw.options !== undefined) return null;
+        q.sourceId = raw.sourceId;
+        q.limit = cleanLimit(raw.limit, 8, 5);
+      } else {
+        if (!Array.isArray(raw.options) || raw.options.length < 2 || raw.options.length > 8) return null;
+        q.options = raw.options
+          .filter((o: any) => isId(o?.id))
+          .map((o: any) => ({ id: o.id, label: cleanText(o.label, 80) ?? "" }));
+        if (q.options!.length < 2) return null;
+      }
+      return q;
     default:
       return null;
   }
+}
+
+function cleanLimit(raw: unknown, max: number, fallback: number): number {
+  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(2, Math.min(max, Math.floor(raw))) : fallback;
+}
+
+export function cleanQuestions(raw: unknown[]): Question[] | string {
+  const questions: Question[] = [];
+  for (const value of raw) {
+    const q = cleanQuestion(value);
+    if (!q) return "One of the questions is invalid.";
+    questions.push(q);
+  }
+  for (const [i, q] of questions.entries()) {
+    if (q.sourceId && !questions.slice(0, i).some((source) =>
+      source.id === q.sourceId && (source.type === "text" || source.type === "words" || source.type === "board"))) {
+      return "'Vote on earlier answers' needs an earlier open text, word cloud or retro board question to take answers from.";
+    }
+  }
+  return questions;
 }
 
 const ADJECTIVES = ["Curious", "Brave", "Sunny", "Quiet", "Clever", "Swift", "Gentle", "Bold", "Witty", "Calm", "Lucky", "Merry"];

@@ -64,6 +64,22 @@ ok((await M(`teams/${other.id}/decks`)).status === 404, "member can't see other 
 log("deck");
 const deck = (await L(`teams/${team.id}/decks`, "POST", { title: "Induction" })).body;
 ok(/^\d{6}$/.test(deck.code), `deck created with code ${deck.code}`);
+const sourceError = "'Vote on earlier answers' needs an earlier open text, word cloud or retro board question to take answers from.";
+const source = { id: "ideas", type: "text", prompt: "Ideas", moderated: false };
+const pick = { id: "vote", type: "pick", prompt: "Choose ideas", sourceId: source.id };
+const laterSource = await M(`decks/${deck.id}`, "PUT", { questions: [pick, source] });
+ok(laterSource.status === 400 && laterSource.body.error === sourceError, "pick can't take answers from a later question");
+const ineligibleSource = await M(`decks/${deck.id}`, "PUT", { questions: [{ ...source, type: "rating" }, pick] });
+ok(ineligibleSource.status === 400 && ineligibleSource.body.error === sourceError, "pick can't take answers from a rating question");
+const savedPick = await M(`decks/${deck.id}`, "PUT", { questions: [source, { ...pick, votesEach: 4, limit: 99 }] });
+ok(savedPick.status === 200, "pick after open text saves");
+const loadedPick = (await M(`decks/${deck.id}`)).body.questions[1];
+ok(loadedPick.votesEach === 3 && loadedPick.limit === 20 && loadedPick.allowOwn === true, "saved pick clamps votes and limit and defaults to allowing own answers");
+const rank = { id: "rank", type: "rank", prompt: "Rank ideas", options: [{ id: "a", label: " First  idea " }, { id: "b", label: "Second idea" }] };
+const bothRank = await M(`decks/${deck.id}`, "PUT", { questions: [source, { ...rank, sourceId: source.id }] });
+ok(bothRank.status === 400 && bothRank.body.error === "One of the questions is invalid.", "rank can't have both typed options and a source");
+const savedRank = await M(`decks/${deck.id}`, "PUT", { questions: [rank] });
+ok(savedRank.status === 200 && savedRank.body.questions[0].options.length === 2 && savedRank.body.questions[0].options[0].label === "First idea", "rank with typed options saves and cleans labels");
 const saved = await M(`decks/${deck.id}`, "PUT", {
   theme: "forest",
   questions: [

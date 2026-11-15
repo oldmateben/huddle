@@ -3,7 +3,7 @@
 export const TERMS_VERSION = "2026-11-03";
 export const FREE_DAILY_REQUESTS = 100_000;
 
-export type QuestionType = "choice" | "rating" | "words" | "text" | "board";
+export type QuestionType = "choice" | "rating" | "words" | "text" | "board" | "pick" | "rank";
 export type Theme = "ink" | "sticky" | "forest" | "night";
 export type Status = "draft" | "live" | "closed";
 export type Role = "leader" | "member";
@@ -14,6 +14,8 @@ export const TYPE_LABELS: Record<QuestionType, string> = {
   words: "Word cloud",
   text: "Open text",
   board: "Retro board",
+  pick: "Vote on earlier answers",
+  rank: "Ranking",
 };
 
 export const THEMES: Record<Theme, string> = {
@@ -23,14 +25,20 @@ export const THEMES: Record<Theme, string> = {
   night: "Night",
 };
 
+export interface Option { id: string; label: string }
+
 export interface Question {
   id: string;
   type: QuestionType;
   prompt: string;
-  options?: { id: string; label: string }[]; // choice
+  options?: Option[]; // choice, rank
   scale?: 5 | 10; // rating
   columns?: string[]; // board
   moderated?: boolean; // text, board: hold entries until approved
+  sourceId?: string; // pick, rank: an earlier text, words or board question
+  votesEach?: 1 | 2 | 3 | 5; // pick: options each person may choose (default 3)
+  limit?: number; // source options: pick 2-20 (default 12), rank 2-8 (default 5)
+  allowOwn?: boolean; // pick: allow voting for your own answer (default true)
 }
 
 export interface Deck {
@@ -78,7 +86,9 @@ export type Results =
   | { type: "rating"; distribution: number[]; average: number; total: number }
   | { type: "words"; words: { text: string; count: number }[]; total: number }
   | { type: "text"; items: Item[]; total: number }
-  | { type: "board"; notes: BoardNote[]; total: number };
+  | { type: "board"; notes: BoardNote[]; total: number }
+  | { type: "pick"; options: Option[]; counts: Record<string, number>; total: number; leftOut: number }
+  | { type: "rank"; options: Option[]; scores: Record<string, number>; firsts: Record<string, number>; total: number; leftOut: number };
 
 export interface Usage {
   total: number;
@@ -99,7 +109,8 @@ export type ClientMsg =
   | { t: "respond"; questionId: string; value: unknown }
   | { t: "upvote"; questionId: string; noteId: string }
   | { t: "control"; status?: Status; activeQuestionId?: string | null }
-  | { t: "moderate"; id: string; hidden: boolean };
+  | { t: "moderate"; id: string; hidden: boolean }
+  | { t: "rebuild"; questionId: string };
 
 export type ServerMsg =
   | { t: "state"; state: PublicState; mine?: unknown; upvoted?: string[] }

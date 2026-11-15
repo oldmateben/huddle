@@ -93,7 +93,9 @@ export default function QuestionEditor({ questions, activeId, onChange }: Props)
 
       <div className="add-row">
         <span className="muted">Add a question:</span>
-        {(Object.keys(TYPE_LABELS) as QuestionType[]).map((t) => (
+        {(Object.keys(TYPE_LABELS) as QuestionType[])
+          // step 3: enable pick and rank creation with their editor controls.
+          .filter((t) => t !== "pick" && t !== "rank").map((t) => (
           <button key={t} onClick={() => onChange([...questions, blankQuestion(t)])}>
             {TYPE_LABELS[t]}
           </button>
