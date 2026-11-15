@@ -2,6 +2,8 @@
 
 Read README.md first for setup. This file is the working context for continuing the build.
 
+The upgrade plan and phase specs are in docs/upgrade-plan.md. Read it before starting upgrade work; the rules in this file override it.
+
 ## What this is
 A self-hosted Mentimeter alternative for Ben Hafner (personal project, ben.hafner@gmail.com = admin). Used alongside training sessions, roughly 1–2 sessions a week with 10–20 questions each; also for personal use (e.g. family). Presenters are invite-only and organised into teams (admin → team leaders → members). Participants never sign in: code or QR, then a typed or random name.
 
