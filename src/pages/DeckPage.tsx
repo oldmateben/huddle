@@ -155,7 +155,7 @@ export default function DeckPage() {
       {live.status === "live" && active && (
         <section className="stage-body">
           <h1 className="stage-prompt">{active.prompt || "Untitled question"}</h1>
-          <Results question={active} results={results[active.id]} onModerate={(rid, hidden) => send({ t: "moderate", id: rid, hidden })} />
+          <Results question={active} results={results[active.id]} onModerate={(rid, hidden) => send({ t: "moderate", id: rid, hidden })} onMerge={(ids, into) => send({ t: "merge", ids, into })} />
         </section>
       )}
       {live.status === "live" && !active && <p className="state">Pick a question below to put it on screen.</p>}

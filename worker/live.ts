@@ -27,6 +27,9 @@ export class LiveSession extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS responses (
       id TEXT PRIMARY KEY, question_id TEXT NOT NULL, pid TEXT NOT NULL, kind TEXT NOT NULL,
       value TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
+    if (!this.sql.exec<{ name: string }>(`PRAGMA table_info(responses)`).toArray().some((c) => c.name === "merged_into")) {
+      this.sql.exec(`ALTER TABLE responses ADD COLUMN merged_into TEXT`);
+    }
     this.sql.exec(`CREATE INDEX IF NOT EXISTS responses_q ON responses(question_id)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS upvotes (note_id TEXT NOT NULL, question_id TEXT NOT NULL, pid TEXT NOT NULL, PRIMARY KEY (note_id, pid))`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS usage (day TEXT PRIMARY KEY, requests INTEGER NOT NULL)`);
@@ -189,12 +192,14 @@ export class LiveSession extends DurableObject<Env> {
     } catch {
       return;
     }
+    if (!msg || typeof msg !== "object") return;
     const att = ws.deserializeAttachment() as Attachment;
 
     if (att.role === "presenter") {
       if (msg.t === "control") this.control(msg.status, msg.activeQuestionId);
       if (msg.t === "rebuild") this.rebuild(msg.questionId);
       if (msg.t === "moderate") this.moderate(msg.id, msg.hidden);
+      if (msg.t === "merge") this.merge(msg.ids, msg.into);
       return;
     }
     if (msg.t === "respond") this.respond(ws, att.pid!, msg.questionId, msg.value);
@@ -241,14 +246,18 @@ export class LiveSession extends DurableObject<Env> {
     const source = this.config?.questions.find((s) => s.id === q.sourceId);
     if (!source) return;
     const kind = source.type === "text" ? "t" : source.type === "board" ? "n" : "v";
-    const rows = this.sql.exec<{ id: string; pid: string; value: string; votes: number }>(
-      `SELECT r.id, r.pid, r.value, (SELECT COUNT(*) FROM upvotes u WHERE u.note_id = r.id) AS votes
-       FROM responses r WHERE r.question_id = ? AND r.kind = ? AND r.hidden = 0 ORDER BY r.created_at, r.rowid`,
+    const rows = this.sql.exec<{ id: string; pid: string; value: string; hidden: number; merged_into: string | null }>(
+      `SELECT r.id, r.pid, r.value, r.hidden, r.merged_into
+       FROM responses r WHERE r.question_id = ? AND r.kind = ? ORDER BY r.created_at, r.rowid`,
       source.id, kind,
     ).toArray();
-    if (source.type === "board") rows.sort((a, b) => b.votes - a.votes);
+    const kept = rows.filter((r) => !r.hidden && !r.merged_into);
+    if (source.type === "board") {
+      const votes = this.upvoteCounts(source.id);
+      kept.sort((a, b) => (votes.get(b.id) ?? 0) - (votes.get(a.id) ?? 0));
+    }
     const unique = new Map<string, { label: string; from: Set<string>; authors: Set<string>; count: number }>();
-    for (const row of rows) {
+    for (const row of kept) {
       const value = JSON.parse(row.value);
       const labels: string[] = source.type === "words" ? value : [source.type === "board" ? value.text : value];
       for (const label of labels) {
@@ -256,6 +265,10 @@ export class LiveSession extends DurableObject<Env> {
         const option = unique.get(key) ?? { label, from: new Set<string>(), authors: new Set<string>(), count: 0 };
         option.from.add(row.id);
         option.authors.add(row.pid);
+        for (const child of rows) if (child.merged_into === row.id) {
+          option.from.add(child.id);
+          option.authors.add(child.pid);
+        }
         option.count++;
         unique.set(key, option);
       }
@@ -286,6 +299,35 @@ export class LiveSession extends DurableObject<Env> {
     this.sql.exec(`UPDATE responses SET hidden = ? WHERE id = ?`, hidden ? 1 : 0, id);
     const q = this.config?.questions.find((x) => x.id === row.question_id);
     if (q) this.pushResults(q);
+  }
+
+  private merge(ids: unknown, into: unknown) {
+    if (!Array.isArray(ids) || !ids.length || !ids.every((id) => typeof id === "string") ||
+      (into !== null && typeof into !== "string")) return;
+    const entries = this.sql.exec<{ id: string; question_id: string; hidden: number; merged_into: string | null }>(
+      `SELECT id, question_id, hidden, merged_into FROM responses WHERE kind IN ('t', 'n')`,
+    ).toArray();
+    const questions = new Set<string>();
+    if (into === null) {
+      for (const row of entries) if (ids.includes(row.id)) {
+        this.sql.exec(`UPDATE responses SET merged_into = NULL WHERE id = ?`, row.id);
+        questions.add(row.question_id);
+      }
+    } else {
+      const target = entries.find((r) => r.id === into);
+      if (!target || target.hidden || target.merged_into || ids.includes(into) ||
+        !ids.every((id) => entries.some((r) => r.id === id && r.question_id === target.question_id))) return;
+      for (const id of ids) {
+        this.sql.exec(`UPDATE responses SET merged_into = ? WHERE id = ? OR merged_into = ?`, into, id, id);
+      }
+      questions.add(target.question_id);
+    }
+    for (const id of questions) {
+      const q = this.config?.questions.find((q) => q.id === id);
+      if (q) this.pushResults(q);
+    }
+    // Refresh phones' selected upvotes without rebuilding frozen option snapshots.
+    if (questions.has(this.activeId ?? "")) this.broadcastState();
   }
 
   // ---------- participant actions ----------
@@ -364,10 +406,14 @@ export class LiveSession extends DurableObject<Env> {
   private upvote(ws: WebSocket, pid: string, questionId: string, noteId: string) {
     const q = this.activeQuestion();
     if (this.status !== "live" || q?.type !== "board" || q.id !== questionId) return;
-    const note = this.sql.exec<{ hidden: number }>(`SELECT hidden FROM responses WHERE id = ? AND kind = 'n'`, noteId).toArray()[0];
-    if (!note || note.hidden) return;
-    const existing = this.sql.exec(`SELECT 1 FROM upvotes WHERE note_id = ? AND pid = ?`, noteId, pid).toArray().length;
-    if (existing) this.sql.exec(`DELETE FROM upvotes WHERE note_id = ? AND pid = ?`, noteId, pid);
+    if (typeof noteId !== "string") return;
+    const note = this.sql.exec<{ hidden: number; merged_into: string | null }>(
+      `SELECT hidden, merged_into FROM responses WHERE id = ? AND question_id = ? AND kind = 'n'`, noteId, q.id,
+    ).toArray()[0];
+    if (!note || note.hidden || note.merged_into) return;
+    const group = `SELECT id FROM responses WHERE question_id = ? AND (id = ? OR merged_into = ?)`;
+    const existing = this.sql.exec(`SELECT 1 FROM upvotes WHERE pid = ? AND note_id IN (${group})`, pid, q.id, noteId, noteId).toArray().length;
+    if (existing) this.sql.exec(`DELETE FROM upvotes WHERE pid = ? AND note_id IN (${group})`, pid, q.id, noteId, noteId);
     else this.sql.exec(`INSERT INTO upvotes (note_id, question_id, pid) VALUES (?, ?, ?)`, noteId, q.id, pid);
     this.send(ws, this.stateFor(pid));
     this.pushResults(q);
@@ -397,7 +443,7 @@ export class LiveSession extends DurableObject<Env> {
     const mine = this.sql.exec<{ value: string }>(`SELECT value FROM responses WHERE id = ?`, `${q.id}:v:${pid}`).toArray()[0];
     const upvoted =
       q.type === "board"
-        ? this.sql.exec<{ note_id: string }>(`SELECT note_id FROM upvotes WHERE question_id = ? AND pid = ?`, q.id, pid).toArray().map((r) => r.note_id)
+        ? this.sql.exec<{ note_id: string }>(`SELECT DISTINCT COALESCE(r.merged_into, r.id) AS note_id FROM upvotes u JOIN responses r ON r.id = u.note_id WHERE u.question_id = ? AND u.pid = ?`, q.id, pid).toArray().map((r) => r.note_id)
         : undefined;
     const own = q.type === "pick" && q.allowOwn === false &&
       this.config?.questions.find((s) => s.id === q.sourceId)?.type !== "words"
@@ -406,20 +452,23 @@ export class LiveSession extends DurableObject<Env> {
     return { t: "state", state, mine: mine ? JSON.parse(mine.value) : undefined, upvoted, own };
   }
 
+  private upvoteCounts(questionId: string): Map<string, number> {
+    return new Map(this.sql.exec<{ note_id: string; n: number }>(
+      `SELECT COALESCE(r.merged_into, r.id) AS note_id, COUNT(DISTINCT u.pid) AS n
+       FROM upvotes u JOIN responses r ON r.id = u.note_id
+       WHERE u.question_id = ? GROUP BY COALESCE(r.merged_into, r.id)`, questionId,
+    ).toArray().map((r) => [r.note_id, r.n]));
+  }
+
   private resultsFor(q: Question, includeHidden: boolean) {
     const rows = this.sql
       .exec<Row>(
-        `SELECT r.id, r.kind, r.value, r.hidden, r.created_at, p.name FROM responses r
+        `SELECT r.id, r.kind, r.value, r.hidden, r.merged_into, r.created_at, p.name FROM responses r
          LEFT JOIN participants p ON p.pid = r.pid WHERE r.question_id = ?`,
         q.id,
       )
       .toArray();
-    const upvotes = new Map(
-      this.sql
-        .exec<{ note_id: string; n: number }>(`SELECT note_id, COUNT(*) AS n FROM upvotes WHERE question_id = ? GROUP BY note_id`, q.id)
-        .toArray()
-        .map((r) => [r.note_id, r.n]),
-    );
+    const upvotes = this.upvoteCounts(q.id);
     const snapshot = sourced(q) ? this.get<Snapshot>(`opts:${q.id}`) : null;
     const options = sourced(q) ? snapshot?.options ?? [] : q.type === "rank" ? q.options ?? [] : [];
     return aggregate(q, rows, upvotes, {

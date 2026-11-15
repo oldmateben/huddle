@@ -5,6 +5,7 @@ export type Row = {
   kind: string; // v = vote, t = text, n = board note
   value: string; // JSON
   hidden: number;
+  merged_into?: string | null;
   created_at: string;
   name: string | null;
 };
@@ -16,13 +17,20 @@ export function aggregate(
   upvotes: Map<string, number>,
   opts: { includeHidden: boolean; anonymous: boolean; options?: Option[]; leftOut?: number },
 ): Results {
-  const visible = rows.filter((r) => opts.includeHidden || !r.hidden);
+  const visible = rows.filter((r) => !r.merged_into && (opts.includeHidden || !r.hidden));
   const val = (r: Row) => JSON.parse(r.value);
+  const merged = new Map<string, string[]>();
+  for (const r of rows) if (r.merged_into) {
+    const ids = merged.get(r.merged_into) ?? [];
+    ids.push(r.id);
+    merged.set(r.merged_into, ids);
+  }
   const item = (r: Row): Item => ({
     id: r.id,
     text: typeof val(r) === "string" ? val(r) : val(r).text,
     hidden: !!r.hidden,
     createdAt: r.created_at,
+    ...(merged.has(r.id) ? { merged: merged.get(r.id)!.length, ...(opts.includeHidden ? { mergedIds: merged.get(r.id)! } : {}) } : {}),
     ...(opts.anonymous || !r.name ? {} : { author: r.name }),
   });
   const votes = visible.filter((r) => r.kind === "v");

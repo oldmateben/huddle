@@ -5,9 +5,10 @@ interface Props {
   results?: R;
   /** Presenter only: show (hidden=false) or hide (hidden=true) a text entry or note. */
   onModerate?: (id: string, hidden: boolean) => void;
+  onMerge?: (ids: string[], into: string | null) => void;
 }
 
-export default function Results({ question: q, results, onModerate }: Props) {
+export default function Results({ question: q, results, onModerate, onMerge }: Props) {
   if (!results || results.type !== q.type) return <p className="empty">No responses yet.</p>;
 
   switch (results.type) {
@@ -112,7 +113,7 @@ export default function Results({ question: q, results, onModerate }: Props) {
           {shown.length ? (
             <div className="notes">
               {shown.map((it, i) => (
-                <Note key={it.id} item={it} index={i} onHide={onModerate && (() => onModerate(it.id, true))} />
+                <Note key={it.id} item={it} index={i} entries={shown} onMerge={onMerge} onHide={onModerate && (() => onModerate(it.id, true))} />
               ))}
             </div>
           ) : (
@@ -134,7 +135,7 @@ export default function Results({ question: q, results, onModerate }: Props) {
                 {results.notes
                   .filter((n) => n.column === ci && !n.hidden)
                   .map((n, i) => (
-                    <Note key={n.id} item={n} index={i} votes={n.votes} onHide={onModerate && (() => onModerate(n.id, true))} />
+                    <Note key={n.id} item={n} index={i} votes={n.votes} entries={results.notes.filter((n) => !n.hidden)} onMerge={onMerge} onHide={onModerate && (() => onModerate(n.id, true))} />
                   ))}
               </section>
             ))}
@@ -153,13 +154,25 @@ function Total({ n, noun, plural }: { n: number; noun: string; plural?: string }
   );
 }
 
-function Note({ item, index, votes, onHide }: { item: Item; index: number; votes?: number; onHide?: () => void }) {
+function Note({ item, index, votes, onHide, entries = [], onMerge }: { item: Item; index: number; votes?: number; onHide?: () => void; entries?: Item[]; onMerge?: Props["onMerge"] }) {
   return (
     <article className="note" style={{ ["--tilt" as string]: `${((index * 7) % 5) - 2}deg` }}>
       <p>{item.text}</p>
       <footer>
         <span className="author">{item.author}</span>
         {votes !== undefined && <span className="votes">+{votes}</span>}
+        {!!item.merged && <span className="muted">+{item.merged} merged</span>}
+        {onMerge && !!item.mergedIds?.length && (
+          <button className="link no-print" onClick={() => onMerge(item.mergedIds!, null)}>Undo</button>
+        )}
+        {onMerge && (
+          <select className="no-print" aria-label={`Merge “${item.text}” into`} value="" disabled={entries.length < 2} onChange={(e) => {
+            if (e.target.value) onMerge([item.id], e.target.value);
+          }}>
+            <option value="">Merge into…</option>
+            {entries.filter((other) => other.id !== item.id).map((other) => <option key={other.id} value={other.id}>{other.text}</option>)}
+          </select>
+        )}
         {onHide && (
           <button className="link no-print" onClick={onHide}>
             Hide

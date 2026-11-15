@@ -263,6 +263,123 @@ ok((await flowResult("wordpick")).options.length === 0 && (await flowResult("wor
 await L(`decks/${flow.id}`, "DELETE");
 for (const s of [F, f1, f2]) s.ws.close();
 
+log("merge duplicates");
+const mergeDeck = (await L(`teams/${team.id}/decks`, "POST", { title: "Merge checks" })).body;
+await L(`decks/${mergeDeck.id}`, "PUT", { questions: [
+  { id: "board", type: "board", prompt: "Ideas", columns: ["One", "Two"] },
+  { id: "boardpick", type: "pick", prompt: "Vote board", sourceId: "board", allowOwn: false },
+  { id: "text", type: "text", prompt: "Ideas" },
+  { id: "textpick", type: "pick", prompt: "Vote text", sourceId: "text", allowOwn: false },
+] });
+const G = socket(`${W}/api/decks/${mergeDeck.id}/ws`, { cookie: leader.cookie });
+const gids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+const guests = gids.map((id, i) => socket(`${W}/api/join/${mergeDeck.code}/ws?pid=${id}&name=Guest${i}`));
+const [g1, g2, g3] = guests;
+await Promise.all([G.opened, ...guests.map((g) => g.opened)]);
+const mergeControl = async (id) => { G.send({ t: "control", activeQuestionId: id, status: "live" }); await wait(200); };
+const mergeResult = async (id) => (await L(`decks/${mergeDeck.id}/results`)).body.results[id];
+const merge = async (ids, into) => { G.send({ t: "merge", ids, into }); await wait(200); };
+const upvote = async (who, id) => { who.send({ t: "upvote", questionId: "board", noteId: id }); await wait(200); };
+await mergeControl("board");
+await respond(g1, "board", { column: 0, text: "Other idea" });
+await respond(g1, "board", { column: 0, text: "Kept idea" });
+await respond(g2, "board", { column: 1, text: "Similar idea" });
+let notes = G.last("results").results.notes;
+const otherNote = notes.find((n) => n.text === "Other idea");
+const keptNote = notes.find((n) => n.text === "Kept idea");
+const duplicateNote = notes.find((n) => n.text === "Similar idea");
+for (const g of [g1, g2]) {
+  for (const n of [otherNote, keptNote, duplicateNote]) await upvote(g, n.id);
+}
+await upvote(g3, duplicateNote.id);
+await merge([duplicateNote.id], keptNote.id);
+notes = G.last("results").results.notes;
+let keptNoteResult = notes.find((n) => n.id === keptNote.id);
+ok(!notes.some((n) => n.id === duplicateNote.id) && !g1.last("board").results.notes.some((n) => n.id === duplicateNote.id) &&
+  keptNoteResult.merged === 1 && JSON.stringify(keptNoteResult.mergedIds) === JSON.stringify([duplicateNote.id]), "board merge removes duplicate from presenter and participant results and exposes undo ids only to presenter");
+ok(keptNoteResult.votes === 3, "board merge counts two people who voted on both once, plus the merged-only voter");
+ok(guests.every((g) => JSON.stringify([...g.last("state").upvoted].sort()) ===
+  JSON.stringify((g === g3 ? [keptNote.id] : [otherNote.id, keptNote.id]).sort())), "merged upvotes select the kept note on phones");
+const privateMergePayload = (msg) => {
+  const json = JSON.stringify(msg);
+  return ![...gids, '"pid"', '"mergedIds"'].some((secret) => json.includes(secret));
+};
+ok(guests.every((g) => g.msgs.filter((m) => m.t === "board" || m.t === "state").every(privateMergePayload)), "participant board and state never contain merged ids or participant ids");
+const beforeStaleUpvote = JSON.stringify(await mergeResult("board"));
+await upvote(g3, duplicateNote.id);
+ok(JSON.stringify(await mergeResult("board")) === beforeStaleUpvote, "upvoting a merged-away note is ignored");
+await merge(keptNoteResult.mergedIds, null);
+notes = G.last("results").results.notes;
+ok(notes.find((n) => n.id === keptNote.id).votes === 2 && notes.find((n) => n.id === duplicateNote.id).votes === 3 &&
+  notes.every((n) => n.merged === undefined && n.mergedIds === undefined), "board undo restores separate notes and their original upvotes");
+await merge([duplicateNote.id], keptNote.id);
+await upvote(g1, keptNote.id);
+ok(G.last("results").results.notes.find((n) => n.id === keptNote.id).votes === 2 &&
+  !g1.last("state").upvoted.includes(keptNote.id), "toggling kept note removes all of a person's grouped upvotes");
+await upvote(g1, keptNote.id);
+ok(G.last("results").results.notes.find((n) => n.id === keptNote.id).votes === 3 &&
+  g1.last("state").upvoted.includes(keptNote.id), "toggling kept note adds one vote when no grouped upvote remains");
+await mergeControl("boardpick");
+let mergeOptions = g2.last("state").state.activeQuestion.options;
+ok(mergeOptions.length === 2 && mergeOptions[0].label === "Kept idea" &&
+  g2.last("state").own.includes(mergeOptions[0].id), "board pick uses combined distinct votes for ordering and includes merged authors in own");
+await mergeControl("text");
+await respond(g1, "text", "Text A");
+await respond(g2, "text", "Text B");
+await respond(g3, "text", "Text C");
+await respond(g3, "text", "Hidden text");
+const texts = G.last("results").results.items;
+const ta = texts.find((i) => i.text === "Text A").id;
+const tb = texts.find((i) => i.text === "Text B").id;
+const tc = texts.find((i) => i.text === "Text C").id;
+const th = texts.find((i) => i.text === "Hidden text").id;
+G.send({ t: "moderate", id: th, hidden: true });
+await wait(200);
+for (const [ids, into, label] of [
+  [[ta], keptNote.id, "across questions"], [[ta], ta, "into itself"], [[ta], th, "into a hidden entry"],
+  [[ta, "missing"], tb, "with a missing source"], [["missing"], null, "undo of missing ids"],
+  ["bad", tb, "with a non-array ids value"], [[ta], {}, "with an invalid target"],
+]) {
+  const before = JSON.stringify(await mergeResult("text"));
+  await merge(ids, into);
+  ok(JSON.stringify(await mergeResult("text")) === before, `merge refused ${label} without changes`);
+}
+const beforeParticipantMerge = JSON.stringify(await mergeResult("text"));
+g1.send({ t: "merge", ids: [ta], into: tb });
+await wait(200);
+ok(JSON.stringify(await mergeResult("text")) === beforeParticipantMerge, "participants cannot merge entries");
+await mergeControl("textpick");
+const frozenMergeOptions = JSON.stringify(g2.last("state").state.activeQuestion.options);
+await merge([ta], tb);
+let mergedText = (await mergeResult("text")).items;
+ok(!mergedText.some((i) => i.id === ta) && mergedText.find((i) => i.id === tb).merged === 1, "text merge removes duplicate and shows merged count");
+await mergeControl("textpick");
+ok(JSON.stringify(g2.last("state").state.activeQuestion.options) === frozenMergeOptions, "merge leaves existing sourced options frozen");
+G.send({ t: "rebuild", questionId: "textpick" });
+await wait(200);
+mergeOptions = g1.last("state").state.activeQuestion.options;
+const textGroupOption = mergeOptions.find((o) => o.label === "Text B");
+ok(mergeOptions.length === 2 && !mergeOptions.some((o) => o.label === "Text A") &&
+  g1.last("state").own.includes(textGroupOption.id) && !(await respond(g1, "textpick", [textGroupOption.id])).ok,
+  "pick rebuilt after merge has one group option and refuses the merged author's own vote");
+const beforeMergedTarget = JSON.stringify(await mergeResult("text"));
+await merge([tc], ta);
+ok(JSON.stringify(await mergeResult("text")) === beforeMergedTarget, "merge into an already merged entry is refused");
+await merge([ta], null);
+mergedText = (await mergeResult("text")).items;
+ok(mergedText.some((i) => i.id === ta) && mergedText.find((i) => i.id === tb).merged === undefined, "text undo restores duplicate and clears merged count");
+await merge([ta], tb);
+await merge([tb], tc);
+mergedText = (await mergeResult("text")).items;
+const chain = mergedText.find((i) => i.id === tc);
+ok(chain.merged === 2 && chain.mergedIds.length === 2 && [ta, tb].every((id) => chain.mergedIds.includes(id)) &&
+  !mergedText.some((i) => i.id === ta || i.id === tb), "merge chain is flattened so A and B both belong directly to C");
+await merge(chain.mergedIds, null);
+mergedText = (await mergeResult("text")).items;
+ok([ta, tb, tc].every((id) => mergedText.some((i) => i.id === id && i.merged === undefined)), "undo on flattened ids restores both entries");
+await L(`decks/${mergeDeck.id}`, "DELETE");
+for (const s of [G, ...guests]) s.ws.close();
+
 log("cleanup");
 const dup = (await L(`decks/${deck.id}/duplicate`, "POST")).body;
 ok(dup.questions.length === 4 && dup.code !== deck.code, "duplicate keeps questions, new code");

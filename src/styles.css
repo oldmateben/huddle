@@ -183,7 +183,9 @@ input[type="checkbox"] { width: auto; accent-color: var(--marker); }
 .notes { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
 .note { background: var(--sticky); color: var(--sticky-ink); padding: 0.9rem 1rem 0.6rem; border-radius: 2px; transform: rotate(var(--tilt, 0deg)); box-shadow: 0 2px 0 rgba(43, 36, 16, 0.18); font-size: 1.125rem; break-inside: avoid; }
 .note p { margin: 0 0 0.4rem; overflow-wrap: anywhere; }
-.note footer { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; min-height: 1.5rem; }
+.note footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem 0.75rem; min-height: 1.5rem; }
+.note footer select { flex: 1 1 8rem; min-width: 8rem; }
+.note footer .muted { font-size: 0.875rem; white-space: nowrap; }
 .note .votes { font: 800 1rem var(--display); }
 .note .link { color: var(--sticky-ink); font-size: 0.875rem; text-decoration: underline; }
 .board { display: grid; gap: 1rem; overflow-x: auto; }

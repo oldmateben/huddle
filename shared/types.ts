@@ -78,6 +78,8 @@ export interface Item {
   hidden: boolean;
   createdAt: string;
   author?: string;
+  merged?: number;
+  mergedIds?: string[]; // presenter results only
 }
 export type BoardNote = Item & { column: number; votes: number };
 
@@ -110,7 +112,8 @@ export type ClientMsg =
   | { t: "upvote"; questionId: string; noteId: string }
   | { t: "control"; status?: Status; activeQuestionId?: string | null }
   | { t: "moderate"; id: string; hidden: boolean }
-  | { t: "rebuild"; questionId: string };
+  | { t: "rebuild"; questionId: string }
+  | { t: "merge"; ids: string[]; into: string | null };
 
 export type ServerMsg =
   | { t: "state"; state: PublicState; mine?: unknown; upvoted?: string[]; own?: string[] }
