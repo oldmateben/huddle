@@ -326,10 +326,10 @@ The build must follow the hard rules already in `CLAUDE.md`. The table lists whe
 
 These change the build, so decide them before handing Phase 1 over. The spec assumes the first answer in each case.
 
-- [ ] **Votes per person:** default of 3, with 1, 2, 3 or 5 on offer. Or should it scale with the number of options?
-- [ ] **Can people vote for their own idea?** Decided: a presenter setting on each vote question, default on, as a soft guard. Never applies to ranking or to word-cloud sources. See the Phase 1 section.
-- [ ] **Ranking length:** full order of up to 8, or "pick your top 3" from a longer list?
-- [ ] **Text upvotes:** leave upvoting to the board, or extend it to open text as well? Voting on earlier answers covers most of the need.
-- [ ] **Source questions moderated by default:** on, as the guardrail suggests, or leave it to the presenter?
-- [ ] **Word cloud as a source:** decided: keep it. Word clouds count as a source.
-- [ ] **Who builds it:** Claude Code on the Pi, or Codex? Either way, add this doc's Phase 1 section to the repo as `docs/phase-1.md` and point `CLAUDE.md` at it.
+- [x] **Votes per person:** decided: fixed, default 3, with 1, 2, 3 or 5 on offer. Does not scale with the number of options.
+- [x] **Can people vote for their own idea?** Decided: a presenter setting on each vote question, default on, as a soft guard. Never applies to ranking or to word-cloud sources. See the Phase 1 section.
+- [x] **Ranking length:** decided: full order of up to 8, not "top 3" from a longer list.
+- [x] **Text upvotes:** decided: board only. Voting on earlier answers covers open text.
+- [x] **Source questions moderated by default:** decided: on. A question used as a source starts with "hold until approved" on; the presenter can switch it off.
+- [x] **Word cloud as a source:** decided: keep it. Word clouds count as a source.
+- [x] **Who builds it:** decided: Codex implements, Claude manages and reviews each step. Either way, add this doc's Phase 1 section to the repo as `docs/phase-1.md` and point `CLAUDE.md` at it.
