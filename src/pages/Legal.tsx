@@ -30,7 +30,7 @@ export function Terms() {
       <h2 id="participants">If you're joining a session</h2>
       <ul>
         <li>You don't need an account. You join with a code and a name you choose, or a random one.</li>
-        <li>Your responses are seen by the presenter and may be shown on screen to everyone in the session. Unless the session is set to anonymous, your chosen name may appear next to what you write.</li>
+        <li>Your responses are seen by the presenter and may be shown on screen to everyone in the session. Some questions also show earlier responses on other participants' phones as options to vote on, without your name. Unless the session is set to anonymous, your chosen name may appear next to what you write.</li>
         <li>Don't share anything you wouldn't want shown to the room. Never include client, patient or case information, or personal details about anyone else.</li>
         <li>By joining a session you agree to these terms and the <Link to="/privacy">privacy notice</Link>.</li>
       </ul>
@@ -87,7 +87,7 @@ export function Privacy() {
       <ul>
         <li><strong>What we keep:</strong> the name you choose, your responses, and a random ID stored in your browser so you can change your vote after a refresh. The ID doesn't identify you.</li>
         <li><strong>What we don't keep:</strong> no account, email address or contact details. The app doesn't store your IP address.</li>
-        <li><strong>Who sees it:</strong> the presenter and their team. Responses may be shown on screen to the session. In anonymous sessions your name isn't shown with your responses, but it's still stored with the session.</li>
+        <li><strong>Who sees it:</strong> the presenter and their team. Responses may be shown on screen to the session, and some may appear on other participants' phones as options to vote on, without your name. In anonymous sessions your name isn't shown with your responses, but it's still stored with the session.</li>
       </ul>
 
       <h2>Presenters</h2>

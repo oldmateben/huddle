@@ -1,6 +1,6 @@
 // Shared by the Worker (worker/) and the React app (src/).
 
-export const TERMS_VERSION = "2026-11-03";
+export const TERMS_VERSION = "2026-11-15";
 export const FREE_DAILY_REQUESTS = 100_000;
 
 export type QuestionType = "choice" | "rating" | "words" | "text" | "board" | "pick" | "rank";
