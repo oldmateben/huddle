@@ -1,4 +1,4 @@
-import type { BoardNote, Item, Question, Results } from "../shared/types";
+import type { BoardNote, Item, Option, Question, Results } from "../shared/types";
 
 export type Row = {
   id: string;
@@ -14,7 +14,7 @@ export function aggregate(
   q: Question,
   rows: Row[],
   upvotes: Map<string, number>,
-  opts: { includeHidden: boolean; anonymous: boolean },
+  opts: { includeHidden: boolean; anonymous: boolean; options?: Option[]; leftOut?: number },
 ): Results {
   const visible = rows.filter((r) => opts.includeHidden || !r.hidden);
   const val = (r: Row) => JSON.parse(r.value);
@@ -28,11 +28,26 @@ export function aggregate(
   const votes = visible.filter((r) => r.kind === "v");
 
   switch (q.type) {
-    // step 2: aggregate votes and rankings using resolved options.
-    case "pick":
-      return { type: "pick", options: [], counts: {}, total: 0, leftOut: 0 };
-    case "rank":
-      return { type: "rank", options: [], scores: {}, firsts: {}, total: 0, leftOut: 0 };
+    case "pick": {
+      const options = opts.options ?? [];
+      const counts: Record<string, number> = Object.fromEntries(options.map((o) => [o.id, 0]));
+      for (const r of votes) for (const id of val(r)) if (Object.hasOwn(counts, id)) counts[id]++;
+      return { type: "pick", options, counts, total: votes.length, leftOut: opts.leftOut ?? 0 };
+    }
+    case "rank": {
+      const options = opts.options ?? [];
+      const scores: Record<string, number> = Object.fromEntries(options.map((o) => [o.id, 0]));
+      const firsts = { ...scores };
+      let total = 0;
+      for (const r of votes) {
+        const order = val(r);
+        if (!Array.isArray(order) || order.length !== options.length || new Set(order).size !== options.length ||
+          !order.every((id) => typeof id === "string" && Object.hasOwn(scores, id))) continue;
+        order.forEach((id, i) => { scores[id] += options.length - i; if (i === 0) firsts[id]++; });
+        total++;
+      }
+      return { type: "rank", options, scores, firsts, total, leftOut: opts.leftOut ?? 0 };
+    }
     case "choice": {
       const counts: Record<string, number> = Object.fromEntries((q.options ?? []).map((o) => [o.id, 0]));
       for (const r of votes) if (val(r) in counts) counts[val(r)]++;

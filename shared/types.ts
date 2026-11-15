@@ -113,7 +113,7 @@ export type ClientMsg =
   | { t: "rebuild"; questionId: string };
 
 export type ServerMsg =
-  | { t: "state"; state: PublicState; mine?: unknown; upvoted?: string[] }
+  | { t: "state"; state: PublicState; mine?: unknown; upvoted?: string[]; own?: string[] }
   | { t: "ack"; questionId: string; ok: boolean; msg: string }
   | { t: "board"; questionId: string; results: Results }
   | { t: "results"; questionId: string; results: Results }

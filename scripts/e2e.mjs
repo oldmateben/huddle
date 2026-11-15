@@ -148,6 +148,121 @@ await wait(300);
 ok(p1.last("state")?.state.status === "closed", "participants see session ended");
 ok((await L(`teams/${team.id}/decks`)).body[0].status === "closed", "deck status saved to D1");
 
+log("sourced voting and ranking");
+const flow = (await L(`teams/${team.id}/decks`, "POST", { title: "Brainstorm flow" })).body;
+const flowQuestions = [
+  { id: "ideas", type: "text", prompt: "Ideas", moderated: true },
+  { id: "pick", type: "pick", prompt: "Vote", sourceId: "ideas", votesEach: 2, limit: 3, allowOwn: false },
+  { id: "rank", type: "rank", prompt: "Rank", sourceId: "ideas", limit: 3 },
+  { id: "words", type: "words", prompt: "Words" },
+  { id: "wordpick", type: "pick", prompt: "Vote words", sourceId: "words", allowOwn: false, limit: 2 },
+  { id: "typed", type: "rank", prompt: "Typed rank", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] },
+  { id: "board", type: "board", prompt: "Board", columns: ["Ideas"] },
+  { id: "boardpick", type: "pick", prompt: "Vote board", sourceId: "board", limit: 2 },
+];
+await L(`decks/${flow.id}`, "PUT", { questions: flowQuestions });
+const F = socket(`${W}/api/decks/${flow.id}/ws`, { cookie: leader.cookie });
+const fid1 = crypto.randomUUID(), fid2 = crypto.randomUUID();
+const f1 = socket(`${W}/api/join/${flow.code}/ws?pid=${fid1}&name=AuthorOne`);
+const f2 = socket(`${W}/api/join/${flow.code}/ws?pid=${fid2}&name=AuthorTwo`);
+await Promise.all([F.opened, f1.opened, f2.opened]);
+const control = async (id, status) => { F.send({ t: "control", activeQuestionId: id, ...(status ? { status } : {}) }); await wait(200); };
+const respond = async (who, questionId, value) => { who.send({ t: "respond", questionId, value }); await wait(200); return who.last("ack"); };
+const rebuild = async (questionId) => { F.send({ t: "rebuild", questionId }); await wait(200); };
+const flowResult = async (id) => (await L(`decks/${flow.id}/results`)).body.results[id];
+const cleanPayload = (msg) => {
+  const text = JSON.stringify(msg);
+  return ![fid1, fid2, "AuthorOne", "AuthorTwo", '"authors"', '"from"', '"author"'].some((secret) => text.includes(secret));
+};
+await control("pick", "live");
+ok(f1.last("state").state.activeQuestion.options.length === 0 &&
+  (await respond(f1, "pick", ["o1"])).msg === "The presenter hasn't opened the options yet.", "pick waits when there aren't two visible answers");
+await control("ideas");
+await respond(f1, "ideas", "First idea");
+await respond(f2, "ideas", "  FIRST   idea ");
+await respond(f2, "ideas", "Second idea");
+await respond(f2, "ideas", "Third idea");
+await respond(f2, "ideas", "Hidden idea");
+for (const item of F.last("results").results.items.filter((i) => i.text !== "Hidden idea")) F.send({ t: "moderate", id: item.id, hidden: false });
+await wait(200);
+await control("pick");
+let options = f1.last("state").state.activeQuestion.options;
+ok(JSON.stringify(options) === JSON.stringify([{ id: "o1", label: "First idea" }, { id: "o2", label: "Second idea" }, { id: "o3", label: "Third idea" }]), "pick freezes visible answers, collapses case and spacing duplicates, and keeps the first label");
+ok(JSON.stringify(f1.last("state").own) === '["o1"]' && JSON.stringify(f2.last("state").own) === '["o1","o2","o3"]', "participant state lists own ids including duplicate authors");
+ok((await respond(f1, "pick", ["o1"])).msg === "You can't vote for your own answer on this question.", "own answer refused with exact copy");
+for (const value of [["o1", "o2", "o3"], ["unknown"], ["o2", "o2"], [], null, "o2", [{ id: "o2" }]]) {
+  const ack = await respond(f1, "pick", value);
+  ok(ack.ok === false && ack.msg === "Choose up to 2 options.", `pick rejects invalid value ${JSON.stringify(value)}`);
+}
+ok((await respond(f1, "pick", ["o2", "o3"])).msg === "Your votes are in. You can change them while this question is open.", "pick accepts valid choices with exact success copy");
+await respond(f1, "pick", ["o3"]);
+ok(JSON.stringify(F.last("results").results.counts) === '{"o1":0,"o2":0,"o3":1}' && F.last("results").results.total === 1, "resending replaces votes and updates presenter counts");
+for (const anonymous of [false, true]) {
+  await L(`decks/${flow.id}`, "PUT", { anonymous });
+  await wait(200);
+  ok(cleanPayload(F.last("state")) && cleanPayload(f1.last("state")) && cleanPayload(f2.last("state")) &&
+    cleanPayload(F.last("results")) && cleanPayload(await flowResult("pick")), `state and voting results contain plain options and no authorship (${anonymous ? "anonymous" : "named"})`);
+}
+const allowedQuestions = flowQuestions.map((q) => q.id === "pick" ? { ...q, allowOwn: true } : q);
+await L(`decks/${flow.id}`, "PUT", { questions: allowedQuestions });
+await wait(200);
+ok((await respond(f1, "pick", ["o1"])).ok && f1.last("state").own === undefined, "allowOwn true accepts own answer and omits own state");
+await control("ideas");
+await respond(f1, "ideas", "Late idea");
+const late = F.last("results").results.items.find((i) => i.text === "Late idea");
+F.send({ t: "moderate", id: late.id, hidden: false });
+await wait(200);
+await control("pick");
+ok(JSON.stringify(f1.last("state").state.activeQuestion.options) === JSON.stringify(options), "late source answer leaves frozen options unchanged");
+await rebuild("pick");
+let result = F.last("results").results;
+ok(result.total === 0 && Object.values(result.counts).every((n) => n === 0) && result.leftOut === 1, "rebuild clears votes and counts unique answers beyond limit");
+// Raise the limit so the newly collected answer appears on rebuild.
+await L(`decks/${flow.id}`, "PUT", { questions: allowedQuestions.map((q) => q.id === "pick" ? { ...q, limit: 4 } : q) });
+await rebuild("pick");
+ok(f1.last("state").state.activeQuestion.options.some((o) => o.label === "Late idea"), "rebuild includes a late visible answer");
+await control("rank");
+for (const value of [["o1", "o2"], ["o1", "o1", "o3"], ["o1", "o2", "unknown"], null]) {
+  const ack = await respond(f1, "rank", value);
+  ok(!ack.ok && ack.msg === "Put every option in order.", `rank rejects invalid ordering ${JSON.stringify(value)}`);
+}
+ok((await respond(f1, "rank", ["o1", "o2", "o3"])).msg === "Your ranking is in. Send again to change it.", "rank allows own answers with exact success copy");
+await respond(f2, "rank", ["o2", "o3", "o1"]);
+result = F.last("results").results;
+ok(JSON.stringify(result.scores) === '{"o1":4,"o2":5,"o3":3}' && JSON.stringify(result.firsts) === '{"o1":1,"o2":1,"o3":0}' && result.total === 2, "sourced rank scores and first places match the known ordering");
+ok(f1.last("state").own === undefined && cleanPayload(result), "rank omits authorship and own state");
+await L(`decks/${flow.id}/reset`, "POST", { questionId: "ideas" });
+await wait(200);
+ok(f1.last("state").state.activeQuestion.options.length === 0 && (await flowResult("rank")).total === 0 &&
+  (await flowResult("pick")).options.length === 0 && (await flowResult("pick")).total === 0, "resetting source clears dependent snapshots and votes");
+await control("words");
+await respond(f1, "words", ["zebra", "apple", "pear"]);
+await respond(f2, "words", ["zebra"]);
+await control("wordpick");
+ok(JSON.stringify(f1.last("state").state.activeQuestion.options) === '[{"id":"o1","label":"zebra"},{"id":"o2","label":"apple"}]' &&
+  (await flowResult("wordpick")).leftOut === 1, "words source orders by frequency then alphabetically and applies limit");
+ok((await respond(f1, "wordpick", ["o1"])).ok && f1.last("state").own === undefined, "words source ignores allowOwn false");
+await control("typed");
+await respond(f1, "typed", ["b", "a"]);
+ok(JSON.stringify(F.last("results").results.scores) === '{"a":1,"b":2}' && f1.last("state").state.activeQuestion.options[0].id === "a", "typed rank uses configured options without a snapshot");
+await control("board");
+await respond(f1, "board", { column: 0, text: "Older note" });
+await respond(f2, "board", { column: 0, text: "Popular note" });
+const popular = F.last("results").results.notes.find((n) => n.text === "Popular note");
+f1.send({ t: "upvote", questionId: "board", noteId: popular.id });
+await wait(200);
+await control("boardpick");
+ok(f1.last("state").state.activeQuestion.options[0].label === "Popular note", "board snapshot puts most upvoted notes first");
+await respond(f1, "boardpick", ["o1"]);
+await L(`decks/${flow.id}`, "PUT", { questions: allowedQuestions.map((q) => q.id === "boardpick" ? { ...q, sourceId: "ideas" } : q) });
+await wait(200);
+ok(f1.last("state").state.activeQuestion.options.length === 0 && (await flowResult("boardpick")).total === 0, "changing source clears snapshot and votes");
+await L(`decks/${flow.id}/reset`, "POST", {});
+await wait(200);
+ok((await flowResult("wordpick")).options.length === 0 && (await flowResult("wordpick")).total === 0, "reset all clears snapshots and votes");
+await L(`decks/${flow.id}`, "DELETE");
+for (const s of [F, f1, f2]) s.ws.close();
+
 log("cleanup");
 const dup = (await L(`decks/${deck.id}/duplicate`, "POST")).body;
 ok(dup.questions.length === 4 && dup.code !== deck.code, "duplicate keeps questions, new code");

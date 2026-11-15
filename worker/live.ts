@@ -1,10 +1,14 @@
 // One Durable Object per deck, named by the deck's 6-digit code. It holds the live
 // state, every response, and the open WebSockets for presenters and participants.
 import { DurableObject } from "cloudflare:workers";
-import type { ClientMsg, LiveConfig, PublicState, Question, ResultsBundle, ServerMsg, Status } from "../shared/types";
+import type { ClientMsg, LiveConfig, Option, PublicState, Question, ResultsBundle, ServerMsg, Status } from "../shared/types";
 import { cleanText, isUuid } from "../shared/validate";
 import { aggregate, Row } from "./aggregate";
 import type { Env } from "./env";
+
+type Snapshot = { sourceId: string; options: (Option & { from: string[]; authors: string[] })[]; leftOut: number };
+const sourced = (q: Question) => q.type === "pick" || (q.type === "rank" && !!q.sourceId);
+const plainOptions = (options: Option[]) => options.map(({ id, label }) => ({ id, label }));
 
 type Attachment = { role: "presenter" | "participant"; pid?: string };
 
@@ -84,6 +88,11 @@ export class LiveSession extends DurableObject<Env> {
 
   async configure(cfg: LiveConfig) {
     this.bump();
+    for (const row of this.sql.exec<{ key: string; value: string }>(`SELECT key, value FROM kv WHERE key LIKE 'opts:%'`).toArray()) {
+      const snapshot = JSON.parse(row.value) as Snapshot;
+      const q = cfg.questions.find((q) => `opts:${q.id}` === row.key);
+      if (!q || !sourced(q) || q.sourceId !== snapshot.sourceId) this.clearOptions(row.key.slice(5));
+    }
     this.set("config", cfg);
     if (this.activeId && !cfg.questions.some((q) => q.id === this.activeId)) this.set("active", null);
     this.broadcastState();
@@ -116,13 +125,18 @@ export class LiveSession extends DurableObject<Env> {
   async reset(questionId?: string) {
     this.bump();
     if (questionId) {
-      this.sql.exec(`DELETE FROM responses WHERE question_id = ?`, questionId);
+      this.clearOptions(questionId);
+      for (const q of this.config?.questions ?? []) if (q.sourceId === questionId) this.clearOptions(q.id);
       this.sql.exec(`DELETE FROM upvotes WHERE question_id = ?`, questionId);
     } else {
       this.sql.exec(`DELETE FROM responses`);
       this.sql.exec(`DELETE FROM upvotes`);
       this.sql.exec(`DELETE FROM participants`);
+      this.sql.exec(`DELETE FROM kv WHERE key LIKE 'opts:%'`);
     }
+    // An active vote stays usable after a clear: rebuild its options from what's left.
+    const active = this.activeQuestion();
+    if (active && this.status === "live") this.buildOptions(active);
     this.broadcastState();
     for (const q of this.config?.questions ?? []) this.pushResults(q);
   }
@@ -179,6 +193,7 @@ export class LiveSession extends DurableObject<Env> {
 
     if (att.role === "presenter") {
       if (msg.t === "control") this.control(msg.status, msg.activeQuestionId);
+      if (msg.t === "rebuild") this.rebuild(msg.questionId);
       if (msg.t === "moderate") this.moderate(msg.id, msg.hidden);
       return;
     }
@@ -210,9 +225,59 @@ export class LiveSession extends DurableObject<Env> {
       const ok = activeQuestionId === null || this.config!.questions.some((q) => q.id === activeQuestionId);
       if (ok) this.set("active", activeQuestionId);
     }
-    this.broadcastState();
     const q = this.activeQuestion();
+    if (q && this.status === "live") this.buildOptions(q);
+    this.broadcastState();
     if (q) this.pushResults(q);
+  }
+
+  private clearOptions(questionId: string) {
+    this.sql.exec(`DELETE FROM kv WHERE key = ?`, `opts:${questionId}`);
+    this.sql.exec(`DELETE FROM responses WHERE question_id = ?`, questionId);
+  }
+
+  private buildOptions(q: Question) {
+    if (!sourced(q) || this.get<Snapshot>(`opts:${q.id}`)) return;
+    const source = this.config?.questions.find((s) => s.id === q.sourceId);
+    if (!source) return;
+    const kind = source.type === "text" ? "t" : source.type === "board" ? "n" : "v";
+    const rows = this.sql.exec<{ id: string; pid: string; value: string; votes: number }>(
+      `SELECT r.id, r.pid, r.value, (SELECT COUNT(*) FROM upvotes u WHERE u.note_id = r.id) AS votes
+       FROM responses r WHERE r.question_id = ? AND r.kind = ? AND r.hidden = 0 ORDER BY r.created_at, r.rowid`,
+      source.id, kind,
+    ).toArray();
+    if (source.type === "board") rows.sort((a, b) => b.votes - a.votes);
+    const unique = new Map<string, { label: string; from: Set<string>; authors: Set<string>; count: number }>();
+    for (const row of rows) {
+      const value = JSON.parse(row.value);
+      const labels: string[] = source.type === "words" ? value : [source.type === "board" ? value.text : value];
+      for (const label of labels) {
+        const key = label.toLowerCase().replace(/\s+/g, " ").trim();
+        const option = unique.get(key) ?? { label, from: new Set<string>(), authors: new Set<string>(), count: 0 };
+        option.from.add(row.id);
+        option.authors.add(row.pid);
+        option.count++;
+        unique.set(key, option);
+      }
+    }
+    const answers = [...unique.values()];
+    if (answers.length < 2) return;
+    if (source.type === "words") answers.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    const limit = q.limit ?? (q.type === "pick" ? 12 : 5);
+    this.set(`opts:${q.id}`, {
+      sourceId: source.id,
+      options: answers.slice(0, limit).map((o, i) => ({ id: `o${i + 1}`, label: o.label, from: [...o.from], authors: [...o.authors] })),
+      leftOut: Math.max(0, answers.length - limit),
+    } satisfies Snapshot);
+  }
+
+  private rebuild(questionId: string) {
+    const q = this.config?.questions.find((q) => q.id === questionId);
+    if (!q || !sourced(q)) return;
+    this.clearOptions(q.id);
+    this.buildOptions(q);
+    this.broadcastState();
+    this.pushResults(q);
   }
 
   private moderate(id: string, hidden: boolean) {
@@ -239,6 +304,23 @@ export class LiveSession extends DurableObject<Env> {
       this.sql.exec<{ n: number }>(`SELECT COUNT(*) AS n FROM responses WHERE question_id = ? AND pid = ?`, q.id, pid).one().n;
 
     switch (q.type) {
+      case "pick":
+      case "rank": {
+        const snapshot = this.get<Snapshot>(`opts:${q.id}`);
+        const options = sourced(q) ? snapshot?.options ?? [] : q.options ?? [];
+        if (!options.length) return ack(false, "The presenter hasn't opened the options yet.");
+        const valid = Array.isArray(v) && new Set(v).size === v.length &&
+          v.every((id) => typeof id === "string" && options.some((o) => o.id === id));
+        if (q.type === "pick") {
+          if (!valid || v.length < 1 || v.length > (q.votesEach ?? 3)) return ack(false, `Choose up to ${q.votesEach ?? 3} options.`);
+          if (q.allowOwn === false && this.config?.questions.find((s) => s.id === q.sourceId)?.type !== "words" &&
+            snapshot?.options.some((o) => v.includes(o.id) && o.authors.includes(pid)))
+            return ack(false, "You can't vote for your own answer on this question.");
+        } else if (!valid || v.length !== options.length) return ack(false, "Put every option in order.");
+        put(`${q.id}:v:${pid}`, "v", v);
+        ack(true, q.type === "pick" ? "Your votes are in. You can change them while this question is open." : "Your ranking is in. Send again to change it.");
+        break;
+      }
       case "choice":
         if (!q.options?.some((o) => o.id === v)) return ack(false, "Pick one of the options.");
         put(`${q.id}:v:${pid}`, "v", v);
@@ -296,12 +378,14 @@ export class LiveSession extends DurableObject<Env> {
   private state(): PublicState {
     const cfg = this.config!;
     const status = this.status;
+    let q = this.activeQuestion();
+    if (q && sourced(q)) q = { ...q, options: plainOptions(this.get<Snapshot>(`opts:${q.id}`)?.options ?? []) };
     return {
       title: cfg.title,
       theme: cfg.theme,
       anonymous: cfg.anonymous,
       status,
-      activeQuestion: status === "live" ? this.activeQuestion() : null,
+      activeQuestion: status === "live" ? q : null,
     };
   }
 
@@ -315,7 +399,11 @@ export class LiveSession extends DurableObject<Env> {
       q.type === "board"
         ? this.sql.exec<{ note_id: string }>(`SELECT note_id FROM upvotes WHERE question_id = ? AND pid = ?`, q.id, pid).toArray().map((r) => r.note_id)
         : undefined;
-    return { t: "state", state, mine: mine ? JSON.parse(mine.value) : undefined, upvoted };
+    const own = q.type === "pick" && q.allowOwn === false &&
+      this.config?.questions.find((s) => s.id === q.sourceId)?.type !== "words"
+      ? (this.get<Snapshot>(`opts:${q.id}`)?.options ?? []).filter((o) => o.authors.includes(pid)).map((o) => o.id)
+      : undefined;
+    return { t: "state", state, mine: mine ? JSON.parse(mine.value) : undefined, upvoted, own };
   }
 
   private resultsFor(q: Question, includeHidden: boolean) {
@@ -332,7 +420,11 @@ export class LiveSession extends DurableObject<Env> {
         .toArray()
         .map((r) => [r.note_id, r.n]),
     );
-    return aggregate(q, rows, upvotes, { includeHidden, anonymous: !!this.config?.anonymous });
+    const snapshot = sourced(q) ? this.get<Snapshot>(`opts:${q.id}`) : null;
+    const options = sourced(q) ? snapshot?.options ?? [] : q.type === "rank" ? q.options ?? [] : [];
+    return aggregate(q, rows, upvotes, {
+      includeHidden, anonymous: !!this.config?.anonymous, options: plainOptions(options), leftOut: snapshot?.leftOut ?? 0,
+    });
   }
 
   private pushResults(q: Question) {
