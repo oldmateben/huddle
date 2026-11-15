@@ -17,7 +17,7 @@ export default function DeckPage() {
   const [live, setLive] = useState<{ status: Status; activeId: string | null }>({ status: "draft", activeId: null });
   const [connected, setConnected] = useState(0);
   const [mode, setMode] = useState<"build" | "present">("build");
-  const [saving, setSaving] = useState<"" | "Saving…" | "Saved" | "Couldn't save. Check your connection.">("");
+  const [saving, setSaving] = useState<string>("");
   const [error, setError] = useState("");
   const latest = useRef<Deck | null>(null);
   const timer = useRef<number>();
@@ -56,7 +56,7 @@ export default function DeckPage() {
       api
         .saveDeck(id, { title: d.title, theme: d.theme, anonymous: d.anonymous, questions: d.questions })
         .then(() => setSaving("Saved"))
-        .catch(() => setSaving("Couldn't save. Check your connection."));
+        .catch((e) => setSaving(e.message || "Couldn't save. Check your connection."));
     }, 600);
   };
 
@@ -172,6 +172,13 @@ export default function DeckPage() {
           </div>
           <button disabled={idx >= qs.length - 1} onClick={() => go(idx + 1)}>Next</button>
           <span className="spacer" />
+          {active && (active.type === "pick" || (active.type === "rank" && active.sourceId)) && (
+            <button onClick={() => {
+              if ((results[active.id]?.total ?? 0) > 0 && !confirm("This clears the votes so far.")) return;
+              if (!send({ t: "rebuild", questionId: active.id })) setError("Not connected. Wait a moment and try again.");
+              else setError("");
+            }}>Refresh options</button>
+          )}
           {active && <button className="link" onClick={() => confirm("Clear all responses to this question?") && api.reset(id, active.id)}>Clear responses</button>}
           <button className="danger" onClick={() => confirm("End the session for everyone?") && control({ status: "closed" })}>End session</button>
         </nav>

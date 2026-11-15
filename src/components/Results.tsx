@@ -35,6 +35,34 @@ export default function Results({ question: q, results, onModerate }: Props) {
       );
     }
 
+    case "pick":
+    case "rank": {
+      if (!results.options.length) return <p className="empty">No answers to vote on yet. Go back to the earlier question and collect or approve some.</p>;
+      const counts = results.type === "pick" ? results.counts : results.scores;
+      const max = Math.max(1, ...Object.values(counts));
+      const options = [...results.options].sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0));
+      return (
+        <div className="bars">
+          {options.map((o) => {
+            const n = counts[o.id] ?? 0;
+            const pct = results.total ? Math.round((n / results.total) * 100) : 0;
+            return (
+              <div className="bar-row" key={o.id}>
+                <span className="bar-label">
+                  {o.label || "Untitled option"}
+                  {results.type === "rank" && <small className="first-choices">first choice for {results.firsts[o.id] ?? 0}</small>}
+                </span>
+                <div className="bar-track"><div className="bar" style={{ width: `${(n / max) * 100}%` }} /></div>
+                <span className="bar-count">{n} <small>{results.type === "pick" ? `${pct}%` : "points"}</small></span>
+              </div>
+            );
+          })}
+          {results.leftOut > 0 && <p className="muted">{results.options.length} of {results.options.length + results.leftOut} answers shown</p>}
+          <Total n={results.total} noun="person" plural="people" />
+        </div>
+      );
+    }
+
     case "rating": {
       const max = Math.max(1, ...results.distribution);
       return (

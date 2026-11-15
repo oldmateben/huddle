@@ -100,6 +100,11 @@ input[type="checkbox"] { width: auto; accent-color: var(--marker); }
 .privacy { font-size: 0.9375rem; color: var(--muted); border-left: 4px solid var(--sticky); padding: 0.25rem 0 0.25rem 0.75rem; margin: 0 0 1rem; }
 .choices { display: grid; gap: 0.6rem; }
 .choice { justify-content: flex-start; text-align: left; min-height: 3.25rem; font-size: 1.0625rem; padding: 0.6rem 1rem; }
+.choice { overflow-wrap: anywhere; }
+.ranking { margin: 0; padding-left: 1.75rem; display: grid; gap: 0.6rem; }
+.rank-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ranking .row { flex-wrap: nowrap; }
+.first-choices { display: block; font: 400 1rem var(--body); color: var(--muted); }
 .scale { display: grid; gap: 0.4rem; }
 .scale button { min-height: 3.25rem; padding: 0; font: 800 1.25rem var(--display); }
 .scale-ends { display: flex; justify-content: space-between; font-size: 0.875rem; padding-top: 0.25rem; }
@@ -154,7 +159,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--marker); }
 /* ---------- results (stage + report) ---------- */
 .bars { display: grid; gap: 0.9rem; }
 .bar-row { display: grid; grid-template-columns: minmax(8rem, 18rem) 1fr 6rem; gap: 1rem; align-items: center; }
-.bar-label { font-weight: 700; font-size: 1.25rem; }
+.bar-label { overflow-wrap: anywhere; font-weight: 700; font-size: 1.25rem; }
 .bar-track { height: 2.75rem; background: var(--surface); border-radius: 4px; overflow: hidden; }
 .bar { height: 100%; background: var(--marker); min-width: 4px; transition: width 400ms ease-out; }
 .bar-count { font: 800 1.75rem var(--display); font-variant-numeric: tabular-nums; }

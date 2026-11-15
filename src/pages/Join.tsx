@@ -15,6 +15,7 @@ export default function Join() {
   const [error, setError] = useState("");
   const [name, setName] = useState<string | null>(null);
   const [mine, setMine] = useState<unknown>(undefined);
+  const [own, setOwn] = useState<string[]>([]);
   const [upvoted, setUpvoted] = useState<string[]>([]);
   const [board, setBoard] = useState<Results | null>(null);
   const [ack, setAck] = useState<Ack>(null);
@@ -29,10 +30,13 @@ export default function Join() {
       setState(m.state);
       setMine(m.mine);
       setUpvoted(m.upvoted ?? []);
+      setOwn(m.own ?? []);
+      setAck(null);
     }
     if (m.t === "ack") {
       setAck(m);
-      if (m.ok) setMine(lastSent.current); // highlights the option just chosen
+      // Pick and rank keep local edits while acknowledgements are in flight.
+      if (m.ok && m.questionId === state?.activeQuestion?.id && !["pick", "rank"].includes(state.activeQuestion.type)) setMine(lastSent.current);
     }
     if (m.t === "board") setBoard(m.results);
   });
@@ -62,6 +66,7 @@ export default function Join() {
         key={q.id}
         q={q}
         mine={mine}
+        own={own}
         upvoted={upvoted}
         board={board?.type === "board" ? board : null}
         ack={ack?.questionId === q.id ? ack : null}
@@ -105,6 +110,7 @@ function NameStep({ anonymous, onJoin }: { anonymous: boolean; onJoin: (name: st
 interface AnswerProps {
   q: Question;
   mine: unknown;
+  own: string[];
   upvoted: string[];
   board: Extract<Results, { type: "board" }> | null;
   ack: Ack;
@@ -112,7 +118,7 @@ interface AnswerProps {
   upvote: (noteId: string) => boolean;
 }
 
-function Answer({ q, mine, upvoted, board, ack, send, upvote }: AnswerProps) {
+function Answer({ q, mine, own, upvoted, board, ack, send, upvote }: AnswerProps) {
   return (
     <section className="answer">
       <h1 className="answer-prompt">{q.prompt || "Untitled question"}</h1>
@@ -120,6 +126,8 @@ function Answer({ q, mine, upvoted, board, ack, send, upvote }: AnswerProps) {
         <p className="privacy">Keep it general. Don't include client or personal details.</p>
       )}
       {q.type === "choice" && <ChoiceInput q={q} mine={mine as string} send={send} />}
+      {q.type === "pick" && <PickInput q={q} mine={mine} own={own} send={send} />}
+      {q.type === "rank" && <RankInput q={q} mine={mine} send={send} />}
       {q.type === "rating" && <RatingInput q={q} mine={mine as number} send={send} />}
       {q.type === "words" && <WordsInput send={send} />}
       {q.type === "text" && <TextInput send={send} ack={ack} />}
@@ -141,6 +149,69 @@ function ChoiceInput({ q, mine, send }: { q: Question; mine?: string; send: (v: 
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function PickInput({ q, mine, own, send }: { q: Question; mine: unknown; own: string[]; send: (v: unknown) => boolean }) {
+  const [chosen, setChosen] = useState<string[]>([]);
+  useEffect(() => {
+    setChosen(Array.isArray(mine) ? mine.filter((id): id is string => typeof id === "string" && !!q.options?.some((o) => o.id === id) && !own.includes(id)) : []);
+  }, [mine, q.options, own]);
+  const limit = q.votesEach ?? 3;
+  if (!q.options?.length) return <p className="state">Waiting for the presenter</p>;
+  return (
+    <div className="stack">
+      <p className="muted" role="status">{chosen.length} of {limit} votes used</p>
+      <div className="choices">
+        {q.options.map((o) => {
+          const picked = chosen.includes(o.id);
+          const yours = own.includes(o.id);
+          return (
+            <button key={o.id} className={picked ? "choice is-picked" : "choice"} aria-pressed={picked} disabled={yours || (!picked && chosen.length >= limit)} onClick={() => {
+              const next = picked ? chosen.filter((id) => id !== o.id) : [...chosen, o.id];
+              setChosen(next);
+              if (next.length) send(next);
+            }}>
+              <span>{o.label}</span>{yours && <span className="pill">Yours</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RankInput({ q, mine, send }: { q: Question; mine: unknown; send: (v: unknown) => boolean }) {
+  const [order, setOrder] = useState<string[]>([]);
+  useEffect(() => {
+    const ids = (q.options ?? []).map((o) => o.id);
+    const saved = Array.isArray(mine) ? mine.filter((id): id is string => typeof id === "string" && ids.includes(id)) : [];
+    setOrder([...new Set(saved), ...ids.filter((id) => !saved.includes(id))]);
+  }, [mine, q.options]);
+  const move = (i: number, d: number) => {
+    const next = [...order];
+    [next[i], next[i + d]] = [next[i + d], next[i]];
+    setOrder(next);
+  };
+  if (!q.options?.length) return <p className="state">Waiting for the presenter</p>;
+  return (
+    <div className="stack">
+      <ol className="ranking">
+        {order.map((id, i) => {
+          const label = q.options?.find((o) => o.id === id)?.label ?? "";
+          return (
+            <li key={id}>
+              <div className="row">
+                <span className="rank-label">{label}</span>
+                <button className="icon" disabled={i === 0} aria-label={`Move ${label} up`} onClick={() => move(i, -1)}>↑</button>
+                <button className="icon" disabled={i === order.length - 1} aria-label={`Move ${label} down`} onClick={() => move(i, 1)}>↓</button>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      <button className="primary" onClick={() => send(order)}>Send ranking</button>
     </div>
   );
 }

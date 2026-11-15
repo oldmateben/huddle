@@ -61,18 +61,20 @@ function hideHidden<T extends ResultsBundle["results"][string] | undefined>(r: T
 }
 
 function downloadCsv(deck: Deck, bundle: ResultsBundle) {
-  const rows: (string | number)[][] = [["Question #", "Question", "Type", "Response", "Count / votes", "Column", "Name"]];
+  const rows: (string | number)[][] = [["Question #", "Question", "Type", "Response", "Count / votes", "Column", "Name", "Points", "First choices"]];
   deck.questions.forEach((q, i) => {
     const r = bundle.results[q.id];
     const base = [i + 1, q.prompt, TYPE_LABELS[q.type]];
     if (r?.type === "choice") q.options?.forEach((o) => rows.push([...base, o.label, r.counts[o.id] ?? 0, "", ""]));
+    if (r?.type === "pick") r.options.forEach((o) => rows.push([...base, o.label, r.counts[o.id] ?? 0, "", ""]));
+    if (r?.type === "rank") r.options.forEach((o) => rows.push([...base, o.label, "", "", "", r.scores[o.id] ?? 0, r.firsts[o.id] ?? 0]));
     if (r?.type === "rating") r.distribution.forEach((n, k) => rows.push([...base, `Rated ${k + 1}`, n, "", ""]));
     if (r?.type === "words") r.words.forEach((w) => rows.push([...base, w.text, w.count, "", ""]));
     if (r?.type === "text") r.items.filter((x) => !x.hidden).forEach((x) => rows.push([...base, x.text, "", "", x.author ?? ""]));
     if (r?.type === "board")
       r.notes.filter((x) => !x.hidden).forEach((x) => rows.push([...base, x.text, x.votes, q.columns?.[x.column] ?? "", x.author ?? ""]));
   });
-  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const csv = rows.map((r) => Array.from({ length: rows[0].length }, (_, i) => r[i] ?? "").map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
   a.download = `${deck.title.replace(/[^\w-]+/g, "-")}-${deck.code}.csv`;
