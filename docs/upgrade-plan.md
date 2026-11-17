@@ -84,7 +84,7 @@ The existing backlog in `CLAUDE.md` already lists ranking, quiz mode, templates 
 
 ## Phased plan
 
-Five phases, each shippable on its own. Sizes are relative guesses for an AI-assisted build, not estimates.
+Six phases, each shippable on its own. Sizes are relative guesses for an AI-assisted build, not estimates.
 
 | Phase | What ships | Why here | Size | Done when |
 | --- | --- | --- | --- | --- |
@@ -94,6 +94,7 @@ Five phases, each shippable on its own. Sizes are relative guesses for an AI-ass
 | 3. Insight | Compare the same question across sessions; before and after within a session | Gives evidence that training landed | Medium to large | A report shows the shift between two runs of a question |
 | 4. Look and reuse | Team templates, team default look, custom colours, quiz mode | Polish and repeat use | Medium | A team leader can publish a template others start from |
 | 5. M365 fit | Results-only display link, Teams tab, tenant sign-in | Reach inside work | Small to medium | Only start once there are regular presenters beyond Ben |
+| 6. Friends and sign-in | Invite email, email one-time-code sign-in, per-team usage view | A few friends want to run their own sessions, some without Google | Small to medium | A friend with no Google account can be invited, sign in with a code, and run their own team's sessions |
 
 Build 1a and 1b in that order, then stop and run two or three real sessions before starting Phase 2. What facilitators trip over in those sessions should set the order inside Phase 2.
 
@@ -306,6 +307,20 @@ These are directions, not specs. Each needs a short design pass once Phases 1 an
 - **Teams tab.** A static tab pointing at the join or display page. It needs an app package and, at work, IT approval.
 - **Tenant sign-in.** The tenant allow-list already exists (`MICROSOFT_ALLOWED_TENANTS`). What's left is consent from the work tenant, which is an IT conversation more than a build.
 
+### Phase 6: friends and sign-in
+
+Context: a few friends have asked to use Huddle for their own sessions. Scale is a handful of teams, not a public service. Referral only; no open sign-up. Start once a friend actually wants in, and do a short design pass first.
+
+- **What works today.** The admin creates a team, adds the friend's email as team leader, and they sign in with Google or Microsoft. They see only their own team. Nothing in this phase is needed to onboard a friend who has a Google account.
+- **6a. Invite email.** When the admin or a leader adds someone, send them an email saying what Huddle is and where to sign in. Cap invites per team, let leaders revoke an unused invite, and say in the email that sessions must never hold client information.
+- **6b. Email one-time-code sign-in.** For people without a Google or Microsoft account. They enter their email, get a short code, and type it in. Reasons for a code rather than a link: work email scanners open links and use them up. Codes are single-use, expire in about 10 minutes, are stored hashed in D1, and are rate-limited per email and per IP. The reply never says whether an email has an account. A person who signs in by Google and by email lands on one account, because accounts already match on email.
+- **Sending email.** Needs an email service and a domain Ben owns, with SPF, DKIM and DMARC set up, so messages reach inboxes. Huddle only has `workers.dev` today. Check the email service's free-plan limits and cost before committing.
+- **Per-team usage.** All sessions share one 100,000 requests a day limit, and hitting it stops everyone's sessions. Show usage by team on the admin page, and decide at what point to move to the paid Workers plan (about USD 5 a month).
+- **Friends' responsibilities.** A friend is a presenter under the same terms, responsible for their own sessions' content. Say so in the invite email, and review `src/pages/Legal.tsx` because Ben is now the operator for other people's participants. Bump `TERMS_VERSION` if the wording changes.
+- **Housekeeping.** Remove a person from a team, delete a team and its sessions (exists for the admin), and let someone ask for their account to be deleted.
+- **Out of scope.** Open sign-up, request-access queues and bot protection (Turnstile). Revisit only if sign-ups stop being friends.
+- **Tests.** An expired or reused code is refused; too many codes for one email are refused; the same email via Google and via code is one user; an uninvited email gets no code and no hint either way.
+
 I've left out PowerPoint import. Slido and Vevox both draw complaints about theirs, and uploading decks would cut across the no-documents rule.
 
 ## Guardrails and risks
@@ -320,6 +335,8 @@ The build must follow the hard rules already in `CLAUDE.md`. The table lists whe
 | Anonymity promise broken | Per-question settings in Phase 2; leaderboard in Phase 4 | Questions can only add anonymity. Leaderboard off in anonymous sessions. |
 | Terms drift | Text answers shown to other participants (Phase 1); names list (Phase 2); read-only link (Phase 3) | Review `src/pages/Legal.tsx` with each phase and bump `TERMS_VERSION` when the wording changes. |
 | Regression in live voting | Changes to `respond()` and `state()` | Run `npm run test:e2e` after every change to `worker/` or `shared/`. Existing 34 checks must stay green. |
+| Free plan shared across teams | Phase 6 adds other people's sessions to the same 100,000 requests a day | Per-team usage on the admin page. Move to the paid plan before it becomes a problem. |
+| Sign-in becomes the weak point | Phase 6 email codes | Single-use, short expiry, hashed, rate-limited, no hint whether an account exists. Security review before launch. |
 | Old sessions with new code | Additive column in 1b | Guard the `ALTER`; treat a missing `merged_into` as not merged. |
 
 ## Open questions
