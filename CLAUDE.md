@@ -8,7 +8,7 @@ The upgrade plan and phase specs are in docs/upgrade-plan.md. Read it before sta
 A self-hosted Mentimeter alternative for Ben Hafner (personal project, ben.hafner@gmail.com = admin). Used alongside training sessions, roughly 1–2 sessions a week with 10–20 questions each; also for personal use (e.g. family). Presenters are invite-only and organised into teams (admin → team leaders → members). Participants never sign in: code or QR, then a typed or random name.
 
 ## Hard rules
-- The app must never be designed to hold client, patient or case information. Keep the "keep it general" notes on free-text inputs. Don't add features that invite sensitive data (file uploads of documents, free-text fields about people).
+- The app must never be designed to hold client, patient or case information. Keep the "keep it general" notes on free-text inputs. Don't add features that invite sensitive data (free-text fields about people, features that store documents). Never store uploaded documents. A file may be read in the browser to pull out question text; only the text the presenter approves is sent to the server and kept, and the file itself is never uploaded or stored.
 - Never commit secrets. Secrets go in `wrangler secret put` (prod) or `.dev.vars` (local, gitignored).
 - If you change what data is collected or how it's used, update `src/pages/Legal.tsx` and bump `TERMS_VERSION` in `shared/types.ts`.
 - Validate everything server-side (shared/validate.ts). The client is untrusted, including participants' WebSocket messages.

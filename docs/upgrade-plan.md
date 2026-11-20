@@ -298,7 +298,8 @@ These are directions, not specs. Each needs a short design pass once Phases 1 an
 
 - **Templates.** Mark a deck as a team template; "New from template" reuses the existing duplicate path. Ship three starters: check-in, retro, training evaluation.
 - **Team defaults.** Default look per team, then one accent colour per team as a CSS variable override, with a contrast check.
-- **Text slide.** A heading and a few lines between questions, typed in the editor. No file or image upload, in line with the hard rule in `CLAUDE.md` against features that invite documents.
+- **Text slide.** A heading and a few lines between questions, typed in the editor. No file or image storage, in line with the hard rule in `CLAUDE.md`.
+- **Import questions.** See "Import" below.
 - **Quiz mode.** A correct answer on choice questions, revealed with the Phase 2 reveal control, and an opt-in leaderboard. The leaderboard is off in anonymous sessions.
 
 ### Phase 5: M365 fit
@@ -306,6 +307,7 @@ These are directions, not specs. Each needs a short design pass once Phases 1 an
 - **Display link.** A results-only page for the room screen or a Teams share, so the presenter's editing view never needs to be projected.
 - **Teams tab.** A static tab pointing at the join or display page. It needs an app package and, at work, IT approval.
 - **Tenant sign-in.** The tenant allow-list already exists (`MICROSOFT_ALLOWED_TENANTS`). What's left is consent from the work tenant, which is an IT conversation more than a build.
+- **PowerPoint add-in (down the road).** Let a presenter run Huddle questions from inside their own PowerPoint deck, as Slido and Mentimeter do, so they don't switch windows. Needs an Office add-in package, and at work IT approval, like the Teams tab. It reads nothing from the deck beyond what the presenter chooses, and Huddle still stores no documents. Do a short design pass first; build only after the Teams tab and import are in use.
 
 ### Phase 6: friends and sign-in
 
@@ -327,7 +329,16 @@ Context: a few friends have asked to use Huddle for their own sessions. Scale is
 - **Out of scope.** Open sign-up, request-access queues and bot protection (Turnstile). Revisit only if sign-ups stop being friends. If it does go wider, the order is: a system-settings table with a "sign-up open" flag, then Turnstile and rate limits on sign-up, then per-team usage limits, then the terms and privacy review (with proper advice), then the sign-up screen.
 - **Tests.** An expired or reused code is refused; too many codes for one email are refused; the same email via Google and via code is one user; an uninvited email gets no code and no hint either way; the sign-in rule is called from every sign-in path, so a new path can't skip it.
 
-I've left out PowerPoint import. Slido and Vevox both draw complaints about theirs, and uploading decks would cut across the no-documents rule.
+### Import (decided)
+
+The hard rule in `CLAUDE.md` is about not storing documents or inviting sensitive data. Reading a file to pull out question text is fine, provided the file is never uploaded or stored.
+
+- **How it works.** The file is read in the browser. Only extracted text goes to Huddle, and the presenter sees a preview and keeps or deletes each question before anything is saved. Reading in the browser also keeps the file off Cloudflare and avoids the free plan's short per-request processing limit.
+- **What is extracted.** Slide text (titles and body) and plain lines only. Not speaker notes, comments, document properties or images. Do not keep the filename.
+- **Wording.** The import screen keeps the "Keep it general. Don't include client or personal details." note, and says the file stays on the person's device.
+- **Stages.** (1) Paste a list of questions, one per line, no dependency. (2) CSV, no dependency. (3) PowerPoint and Word text extraction, which realistically needs a small zip-reading library in the browser: ask Ben before adding it.
+- **What an import creates.** Open text and word cloud questions by default, and choice questions when a line is followed by option lines. Never a vote or ranking question, because those need a source question in the same deck.
+- **Tests.** A pasted list becomes the right questions and nothing is saved until the presenter confirms; a file is never sent to the server (check the network calls in the browser run); an oversized list is trimmed to the 50-question limit with a message.
 
 ## Guardrails and risks
 
